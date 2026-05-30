@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Button
-import json, os, time, random, threading
+import json, os, time, threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -57,6 +57,50 @@ MAX_SESSION_HOURS = 12
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# ---------------- ACCESS CONTROL ----------------
+
+class NotAdmin(commands.CheckFailure):
+    pass
+
+class NotClockedIn(commands.CheckFailure):
+    pass
+
+ADMIN_COMMAND_NAMES = {
+    "brownie",
+    "resetuser",
+    "resetallbp",
+    "resetticket",
+    "resetalltickets",
+    "forceclockin",
+    "forceclockout",
+    "forceclockoutall",
+    "adminhelp",
+}
+
+ALWAYS_ALLOWED_COMMANDS = {"help"}
+
+@bot.check
+async def gatekeeper(ctx):
+    if ctx.command is None:
+        return True
+    name = ctx.command.name
+
+    if name in ALWAYS_ALLOWED_COMMANDS:
+        return True
+
+    if name in ADMIN_COMMAND_NAMES:
+        if ctx.author.id not in ADMIN_IDS:
+            raise NotAdmin()
+        return True
+
+    if ctx.author.id in ADMIN_IDS:
+        return True
+
+    user = get_user(ctx.author.id)
+    if not user["clocked_in"]:
+        raise NotClockedIn()
+    return True
+
 # ---------------- DATA ----------------
 
 if os.path.exists(DATA_FILE):
@@ -85,7 +129,7 @@ def _default_user():
         "last_credit_time": 0,
         "ticket_logs": [],
         "active_days": [],
-        "romantic_counters": {a: 0 for a in ROMANTIC_ACTIONS},
+        "romantic_counters": {a: {} for a in ROMANTIC_ACTIONS},
     }
 
 def get_user(uid):
@@ -114,8 +158,11 @@ def get_user(uid):
         if key not in user:
             user[key] = value
 
+    # Migrate romantic counters from old global-int shape to per-target dict shape.
     for action in ROMANTIC_ACTIONS:
-        user["romantic_counters"].setdefault(action, 0)
+        val = user["romantic_counters"].get(action)
+        if not isinstance(val, dict):
+            user["romantic_counters"][action] = {}
 
     return user
 
@@ -318,6 +365,82 @@ async def on_message(message):
         user["bp_week"]+=1
 
     save_data()
+
+# ---------------- HELP ----------------
+
+bot.remove_command("help")
+
+@bot.command(name="help")
+async def help_command(ctx):
+    embed = discord.Embed(
+        title="Commands",
+        description="Stuff you can do while clocked in.",
+        color=discord.Color.green()
+    )
+    embed.add_field(
+        name="Clocking in / out",
+        value="Use the **Clock In** / **Clock Out** buttons on the panel.",
+        inline=False
+    )
+    embed.add_field(
+        name="Your stats",
+        value=(
+            "`!clockstat [@user]` — full stat sheet\n"
+            "`!myrank` — your BP rank\n"
+            "`!myhours` — hours worked\n"
+            "`!mytickets` — tickets credited\n"
+            "`!mymessages` — messages counted"
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="Server",
+        value=(
+            "`!clockedin` — who's currently on the clock\n"
+            "`!bpleaderboard` — top BP\n"
+            "`!ticketleaderboard` — top tickets\n"
+            "`!longesthours` — top hours"
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="Fun",
+        value="`!slap` `!hug` `!kiss` `!cuddle` `!poke` `!tickle` `@user`",
+        inline=False
+    )
+    await ctx.send(embed=embed)
+
+@bot.command(name="adminhelp")
+async def adminhelp_command(ctx):
+    embed = discord.Embed(
+        title="Admin Commands",
+        color=discord.Color.purple()
+    )
+    embed.add_field(
+        name="Brownies",
+        value="`!brownie @user <amount>` — add or remove BP",
+        inline=False
+    )
+    embed.add_field(
+        name="Reset",
+        value=(
+            "`!resetuser @user` — wipe all stats for one user\n"
+            "`!resetticket @user` — reset their ticket/message count\n"
+            "`!resetallbp` — reset BP for everyone\n"
+            "`!resetalltickets` — reset tickets/messages for everyone"
+        ),
+        inline=False
+    )
+    embed.add_field(
+        name="Force clock",
+        value=(
+            "`!forceclockin @user`\n"
+            "`!forceclockout @user`\n"
+            "`!forceclockoutall`"
+        ),
+        inline=False
+    )
+    await ctx.send(embed=embed)
 
 # ---------------- STAFF COMMANDS ----------------
 
@@ -572,8 +695,10 @@ def _register_romantic(action, gif):
     async def romantic_cmd(ctx, member: discord.Member):
         user = get_user(ctx.author.id)
 
-        user["romantic_counters"][action] += 1
-        count = user["romantic_counters"][action]
+        target_key = str(member.id)
+        counters = user["romantic_counters"][action]
+        counters[target_key] = counters.get(target_key, 0) + 1
+        count = counters[target_key]
 
         embed = discord.Embed(
             title=f"{ctx.author.display_name} {action}s {member.display_name}",
@@ -588,6 +713,50 @@ def _register_romantic(action, gif):
 
 for _action, _gif in ROMANTIC_GIFS.items():
     _register_romantic(_action, _gif)
+
+# ---------------- ERRORS ----------------
+
+@bot.event
+async def on_command_error(ctx, error):
+
+    if isinstance(error, commands.CommandNotFound):
+        return
+
+    if isinstance(error, NotAdmin):
+        embed = discord.Embed(
+            title="You are not admin",
+            description="*Ask to become admin (even though u wont become it)*",
+            color=discord.Color.red()
+        )
+        await ctx.send(embed=embed)
+        return
+
+    if isinstance(error, NotClockedIn):
+        embed = discord.Embed(
+            title="Not clocked in",
+            description="*clock in to use the commands*",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+
+    if isinstance(error, commands.NoPrivateMessage):
+        await ctx.send("This command only works in a server.")
+        return
+
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"Missing argument: `{error.param.name}`")
+        return
+
+    if isinstance(error, commands.BadArgument):
+        await ctx.send(f"Bad argument: {error}")
+        return
+
+    if isinstance(error, commands.CheckFailure):
+        return
+
+    print(f"Unhandled error in {ctx.command}: {error!r}")
+    raise error
 
 # ---------------- READY ----------------
 
