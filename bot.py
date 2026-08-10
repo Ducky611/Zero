@@ -31,8 +31,9 @@ if not TOKEN:
 
 # ---------------- CONFIG ----------------
 
-TICKET_CATEGORY_IDS = [
-1509683024894103563
+TICKET_CATEGORY_IDS =[
+1529125690388119622
+1529668023982751794
 ]
 
 ADMIN_IDS = {
@@ -43,8 +44,8 @@ ADMIN_IDS = {
 404758345707290655
 }
 
-CLOCK_PANEL_CHANNEL_ID = 1509746663177060434
-CLOCK_ROLE_ID = 1509677187274379386
+CLOCK_PANEL_CHANNEL_ID = 1536497611505270845
+CLOCK_ROLE_ID = 1536497686746894456
 
 DATA_FILE = "staff_data.json"
 
@@ -171,7 +172,7 @@ def get_user(uid):
 def get_rank(bp):
 
     if bp >= 90:
-        return "Big Boss"
+        return "weirdo why you grinding so much"
     elif bp >= 60:
         return "Head Honcho"
     elif bp >= 35:
