@@ -35,11 +35,13 @@ ADMIN_IDS = {
 }
 CLOCK_PANEL_CHANNEL_ID = 1536497611505270845
 CLOCK_ROLE_ID = 1536497686746894456
-STAFF_ROLE_ID = 0   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
+STAFF_ROLE_ID = 1536497686746894456   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
 DATA_FILE = "staff_data.json"
 MIN_MESSAGE_LENGTH = 2
 MESSAGES_PER_TICKET = 5   # counted messages needed in ONE channel to earn a ticket
 BP_PER_TICKET = 1         # BP awarded when a ticket is earned
+BP_TIER_SIZE = 5          # every this many brownies, earning gets harder
+BP_TIER_DECAY = 0.87      # earn rate multiplies by this per tier (lower = harsher curve)
 MAX_SESSION_HOURS = 12
 AUTO_CLOCKOUT_MINUTES = 30   # no ticket messages for this long while clocked in = auto clockout
 # ---------------- BOT ----------------
@@ -149,6 +151,14 @@ def get_rank(bp):
         return "Rising Star"
     else:
         return "Coffee Fetcher"
+# ---------------- BP EARNING CURVE ----------------
+def bp_multiplier(bp):
+    """Earning slows down every BP_TIER_SIZE brownies you already have."""
+    tier = int(max(bp, 0) // BP_TIER_SIZE)
+    return BP_TIER_DECAY ** tier
+def award_bp(user, amount):
+    """All earned BP goes through the difficulty curve. Admin !brownie bypasses this on purpose."""
+    user["bp_week"] += amount * bp_multiplier(user.get("bp_week", 0))
 # ---------------- CLOCK PANEL ----------------
 CLOCK_PANEL_MESSAGE_ID=None
 class ClockPanel(View):
@@ -298,7 +308,7 @@ async def on_message(message):
         return
     user["last_credit_time"]=now
     user["messages_week"]+=1
-    user["bp_week"]+=0.015
+    award_bp(user, 0.015)
     user["last_messages"].append(content)
     if len(user["last_messages"])>10:
         user["last_messages"].pop(0)
@@ -313,7 +323,7 @@ async def on_message(message):
         progress[ch_key] = progress.get(ch_key, 0) + 1
         if progress[ch_key] >= MESSAGES_PER_TICKET:
             user["tickets_week"] += 1
-            user["bp_week"] += BP_PER_TICKET
+            award_bp(user, BP_PER_TICKET)
             user["credited_channels"].append(ch_key)
             del progress[ch_key]
     save_data()
