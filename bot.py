@@ -35,7 +35,7 @@ ADMIN_IDS = {
 }
 CLOCK_PANEL_CHANNEL_ID = 1536497611505270845
 CLOCK_ROLE_ID = 1536497686746894456
-STAFF_ROLE_ID = 0   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
+STAFF_ROLE_ID = 1536497686746894456   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
 DATA_FILE = "staff_data.json"
 MIN_MESSAGE_LENGTH = 2
 MESSAGES_PER_TICKET = 5   # counted messages needed in ONE channel to earn a ticket
