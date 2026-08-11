@@ -35,11 +35,11 @@ ADMIN_IDS = {
 }
 CLOCK_PANEL_CHANNEL_ID = 1536497611505270845
 CLOCK_ROLE_ID = 1536497686746894456
-STAFF_ROLE_ID = 1536497686746894456   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
-DATA_FILE = "/data/staff_data.json"
+STAFF_ROLE_ID = 0   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
+DATA_FILE = "staff_data.json"
 MIN_MESSAGE_LENGTH = 2
-MESSAGES_PER_TICKET = 8   # counted messages needed in ONE channel to earn a ticket
-BP_PER_TICKET = 2        # BP awarded when a ticket is earned
+MESSAGES_PER_TICKET = 5   # counted messages needed in ONE channel to earn a ticket
+BP_PER_TICKET = 1         # BP awarded when a ticket is earned
 MAX_SESSION_HOURS = 12
 AUTO_CLOCKOUT_MINUTES = 30   # no ticket messages for this long while clocked in = auto clockout
 # ---------------- BOT ----------------
@@ -581,7 +581,7 @@ async def badducklings(ctx):
             f"{u.get('tickets_week', 0)} tickets | "
             f"{round(u.get('hours_week', 0), 2)} hrs\n"
         )
-    embed.add_field(name="Least Work This Week", value=desc or "No data.", inline=False)
+    embed.add_field(name="Least Work This Week", value=desc or "Nobody has done any work yet.", inline=False)
     if staff_role:
         if never:
             never_text = ", ".join(never)
@@ -665,18 +665,26 @@ async def on_command_error(ctx, error):
 @bot.event
 async def on_ready():
     bot.add_view(ClockPanel())
-    # Auto-clock-out anyone who was clocked in across a bot crash or restart
-    # so they don't accumulate phantom hours.
-    cutoff = time.time() - MAX_SESSION_HOURS * 3600
+    # Everyone clocked in before the restart STAYS clocked in.
+    # Sessions older than MAX_SESSION_HOURS still get closed out so nobody
+    # racks up phantom multi-day hours; everyone else gets a fresh idle
+    # timer so the auto-clockout doesn't punish them for bot downtime.
+    now = time.time()
+    cutoff = now - MAX_SESSION_HOURS * 3600
     changed = False
     for u in data.values():
-        if u.get("clocked_in") and (not u.get("clock_time") or u["clock_time"] < cutoff):
+        if not u.get("clocked_in"):
+            continue
+        if not u.get("clock_time") or u["clock_time"] < cutoff:
             if u.get("clock_time"):
-                elapsed = min(time.time() - u["clock_time"], MAX_SESSION_HOURS * 3600)
+                elapsed = min(now - u["clock_time"], MAX_SESSION_HOURS * 3600)
                 u["hours_week"] = u.get("hours_week", 0) + round(elapsed / 3600, 2)
             u["clocked_in"] = False
             u["clock_time"] = None
-            changed = True
+        else:
+            # survived the restart — fresh idle window starting now
+            u["last_activity"] = now
+        changed = True
     if changed:
         save_data()
     if not auto_update_panel.is_running():
