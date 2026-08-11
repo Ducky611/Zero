@@ -35,8 +35,15 @@ ADMIN_IDS = {
 }
 CLOCK_PANEL_CHANNEL_ID = 1536497611505270845
 CLOCK_ROLE_ID = 1536497686746894456
-STAFF_ROLE_ID = 1536497686746894456   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
-DATA_FILE = "staff_data.json"
+STAFF_ROLE_IDS = [
+1528588835049574560,
+1536792944831373356
+1528589200746610768,
+1528589946120835242,
+1529872741170413809
+    # do NOT put 1536497686746894456 in here — that's the clock-in role, it broke the report
+]
+DATA_FILE = "/data/staff_data.json"   # on the Render disk so deploys can't wipe it
 MIN_MESSAGE_LENGTH = 2
 MESSAGES_PER_TICKET = 5   # counted messages needed in ONE channel to earn a ticket
 BP_PER_TICKET = 1         # BP awarded when a ticket is earned
@@ -559,13 +566,18 @@ async def forceclockoutall(ctx):
 @is_admin()
 async def badducklings(ctx):
     """Least work this week + staff who never clocked in"""
-    staff_role = ctx.guild.get_role(STAFF_ROLE_ID)
+    # Collect everyone holding ANY of the staff rank roles (deduped).
+    staff_members = {}
+    for rid in STAFF_ROLE_IDS:
+        role = ctx.guild.get_role(rid)
+        if role:
+            for m in role.members:
+                if not m.bot:
+                    staff_members[m.id] = m
     never = []
     workers = []
-    if staff_role:
-        for member in staff_role.members:
-            if member.bot:
-                continue
+    if staff_members:
+        for member in staff_members.values():
             u = data.get(str(member.id))
             if not u or (
                 u.get("hours_week", 0) == 0
@@ -576,7 +588,7 @@ async def badducklings(ctx):
             else:
                 workers.append((member.display_name, u))
     else:
-        # No staff role configured — fall back to people the bot has data on.
+        # No staff roles configured/found — fall back to people the bot has data on.
         for uid, u in data.items():
             member = ctx.guild.get_member(int(uid))
             if member and not member.bot:
@@ -592,7 +604,7 @@ async def badducklings(ctx):
             f"{round(u.get('hours_week', 0), 2)} hrs\n"
         )
     embed.add_field(name="Least Work This Week", value=desc or "Nobody has done any work yet.", inline=False)
-    if staff_role:
+    if staff_members:
         if never:
             never_text = ", ".join(never)
             if len(never_text) > 1024:
@@ -608,7 +620,7 @@ async def badducklings(ctx):
             never_text = "Everyone has clocked in!"
         embed.add_field(name="Never Clocked In", value=never_text, inline=False)
     else:
-        embed.set_footer(text="Set STAFF_ROLE_ID in the config to also catch staff who never clocked in.")
+        embed.set_footer(text="Paste your staff rank role IDs into STAFF_ROLE_IDS in the config to catch people who never clocked in.")
     await ctx.send(embed=embed)
 # ---------------- ROMANTIC COMMANDS ----------------
 ROMANTIC_GIFS={
