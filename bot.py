@@ -40,6 +40,7 @@ MIN_MESSAGE_LENGTH = 2
 MESSAGES_PER_TICKET = 5   # counted messages needed in ONE channel to earn a ticket
 BP_PER_TICKET = 1         # BP awarded when a ticket is earned
 MAX_SESSION_HOURS = 12
+AUTO_CLOCKOUT_MINUTES = 30   # no ticket messages for this long while clocked in = auto clockout
 # ---------------- BOT ----------------
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -103,6 +104,7 @@ def _default_user():
         "active_days": [],
         "channel_progress": {},    # channel_id -> counted messages toward a ticket
         "credited_channels": [],   # channels this user already earned a ticket from
+        "last_activity": 0,        # last time they sent a message in a ticket channel
         "romantic_counters": {a: {} for a in ROMANTIC_ACTIONS},
     }
 def get_user(uid):
@@ -157,6 +159,7 @@ class ClockPanel(View):
             return await interaction.response.send_message("Already clocked in.",ephemeral=True)
         user["clocked_in"]=True
         user["clock_time"]=time.time()
+        user["last_activity"]=time.time()
         role=interaction.guild.get_role(CLOCK_ROLE_ID)
         if role:
             await interaction.user.add_roles(role)
@@ -227,6 +230,46 @@ async def update_clock_panel():
 @tasks.loop(minutes=1)
 async def auto_update_panel():
     await update_clock_panel()
+# ---------------- IDLE AUTO CLOCKOUT ----------------
+@tasks.loop(minutes=1)
+async def auto_clockout_idle():
+    channel = bot.get_channel(CLOCK_PANEL_CHANNEL_ID)
+    if not channel:
+        return
+    guild = channel.guild
+    role = guild.get_role(CLOCK_ROLE_ID)
+    now = time.time()
+    changed = False
+    for uid, u in data.items():
+        if not u.get("clocked_in"):
+            continue
+        # idle timer counts from clock-in or their last ticket message, whichever is newer
+        last = max(u.get("last_activity", 0) or 0, u.get("clock_time") or 0)
+        if now - last < AUTO_CLOCKOUT_MINUTES * 60:
+            continue
+        if u.get("clock_time"):
+            elapsed = min(now - u["clock_time"], MAX_SESSION_HOURS * 3600)
+            u["hours_week"] = u.get("hours_week", 0) + round(elapsed / 3600, 2)
+        u["clocked_in"] = False
+        u["clock_time"] = None
+        changed = True
+        member = guild.get_member(int(uid))
+        if member:
+            if role:
+                try:
+                    await member.remove_roles(role)
+                except discord.HTTPException:
+                    pass
+            try:
+                await channel.send(
+                    f"{member.mention} was auto clocked out after "
+                    f"{AUTO_CLOCKOUT_MINUTES} minutes with no ticket messages."
+                )
+            except discord.HTTPException:
+                pass
+    if changed:
+        save_data()
+        await update_clock_panel()
 # ---------------- MESSAGE TRACKING ----------------
 @bot.event
 async def on_message(message):
@@ -242,6 +285,7 @@ async def on_message(message):
     user=get_user(message.author.id)
     if not user["clocked_in"]:
         return
+    user["last_activity"] = time.time()
     content=message.content.strip()
     if len(content)<MIN_MESSAGE_LENGTH:
         return
@@ -467,6 +511,7 @@ async def forceclockin(ctx, member: discord.Member):
     user = get_user(member.id)
     user["clocked_in"] = True
     user["clock_time"] = time.time()
+    user["last_activity"] = time.time()
     save_data()
     await ctx.send(f"{member.display_name} has been force clocked in.")
 @bot.command()
@@ -574,6 +619,8 @@ async def on_ready():
         save_data()
     if not auto_update_panel.is_running():
         auto_update_panel.start()
+    if not auto_clockout_idle.is_running():
+        auto_clockout_idle.start()
     await update_clock_panel()
     print(f"Logged in as {bot.user}")
 bot.run(TOKEN)
