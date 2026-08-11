@@ -35,6 +35,7 @@ ADMIN_IDS = {
 }
 CLOCK_PANEL_CHANNEL_ID = 1536497611505270845
 CLOCK_ROLE_ID = 1536497686746894456
+STAFF_ROLE_ID = 0   # paste your @Staff role ID here so !badducklings can catch people who never clocked in
 DATA_FILE = "staff_data.json"
 MIN_MESSAGE_LENGTH = 2
 MESSAGES_PER_TICKET = 5   # counted messages needed in ONE channel to earn a ticket
@@ -58,6 +59,7 @@ ADMIN_COMMAND_NAMES = {
     "forceclockin",
     "forceclockout",
     "forceclockoutall",
+    "badducklings",
     "adminhelp",
 }
 ALWAYS_ALLOWED_COMMANDS = {"help"}
@@ -386,6 +388,11 @@ async def adminhelp_command(ctx):
         ),
         inline=False
     )
+    embed.add_field(
+        name="Reports",
+        value="`!badducklings` — least work this week + who never clocked in",
+        inline=False
+    )
     await ctx.send(embed=embed)
 # ---------------- STAFF COMMANDS ----------------
 @bot.command()
@@ -538,6 +545,61 @@ async def forceclockoutall(ctx):
         u["clock_time"] = None
     save_data()
     await ctx.send("Everyone has been force clocked out.")
+@bot.command()
+@is_admin()
+async def badducklings(ctx):
+    """Least work this week + staff who never clocked in"""
+    staff_role = ctx.guild.get_role(STAFF_ROLE_ID)
+    never = []
+    workers = []
+    if staff_role:
+        for member in staff_role.members:
+            if member.bot:
+                continue
+            u = data.get(str(member.id))
+            if not u or (
+                u.get("hours_week", 0) == 0
+                and u.get("messages_week", 0) == 0
+                and not u.get("clocked_in")
+            ):
+                never.append(member.display_name)
+            else:
+                workers.append((member.display_name, u))
+    else:
+        # No staff role configured — fall back to people the bot has data on.
+        for uid, u in data.items():
+            member = ctx.guild.get_member(int(uid))
+            if member and not member.bot:
+                workers.append((member.display_name, u))
+    # least BP first, hours as tiebreaker
+    workers.sort(key=lambda x: (x[1].get("bp_week", 0), x[1].get("hours_week", 0)))
+    embed = discord.Embed(title="Bad Ducklings Report", color=discord.Color.red())
+    desc = ""
+    for i, (name, u) in enumerate(workers[:10], 1):
+        desc += (
+            f"{i}. {name} - {round(u.get('bp_week', 0), 2)} BP | "
+            f"{u.get('tickets_week', 0)} tickets | "
+            f"{round(u.get('hours_week', 0), 2)} hrs\n"
+        )
+    embed.add_field(name="Least Work This Week", value=desc or "No data.", inline=False)
+    if staff_role:
+        if never:
+            never_text = ", ".join(never)
+            if len(never_text) > 1024:
+                shown = []
+                total = 0
+                for n in never:
+                    if total + len(n) + 2 > 950:
+                        break
+                    shown.append(n)
+                    total += len(n) + 2
+                never_text = ", ".join(shown) + f" ...and {len(never) - len(shown)} more"
+        else:
+            never_text = "Everyone has clocked in!"
+        embed.add_field(name="Never Clocked In", value=never_text, inline=False)
+    else:
+        embed.set_footer(text="Set STAFF_ROLE_ID in the config to also catch staff who never clocked in.")
+    await ctx.send(embed=embed)
 # ---------------- ROMANTIC COMMANDS ----------------
 ROMANTIC_GIFS={
 "slap":"https://media.giphy.com/media/Gf3AUz3eBNbTW/giphy.gif",
