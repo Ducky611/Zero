@@ -261,12 +261,12 @@ async def auto_clockout_idle():
                 except discord.HTTPException:
                     pass
             try:
-                await channel.send(
-                    f"{member.mention} was auto clocked out after "
+                await member.send(
+                    f"You were auto clocked out after "
                     f"{AUTO_CLOCKOUT_MINUTES} minutes with no ticket messages."
                 )
             except discord.HTTPException:
-                pass
+                pass  # their DMs are closed — they still get clocked out, just no notice
     if changed:
         save_data()
         await update_clock_panel()
